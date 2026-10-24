@@ -1,0 +1,14 @@
+{
+  "total_revenue": 11290659.329999998,
+  "total_profit": 3770441.83,
+  "total_cogs": 6225202.75,
+  "n_transactions": 120000,
+  "n_customers": 75799,
+  "n_stores": 200,
+  "n_products": 5000,
+  "total_items_sold": 1061870,
+  "avg_basket_value": 94.08882774999998,
+  "avg_profit_margin_pct": 33.394345890693,
+  "date_start": "2023-01-01",
+  "date_end": "2024-12-30"
+}

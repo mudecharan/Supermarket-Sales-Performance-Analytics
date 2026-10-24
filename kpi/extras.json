@@ -1,0 +1,14 @@
+{
+  "return_rate_pct": 3.0608333333333335,
+  "avg_satisfaction": 3.9585942134903918,
+  "avg_service_rating": 3.959820833333333,
+  "avg_discount_pct": 12.816375,
+  "promotion_active_pct": 35.2175,
+  "coupon_usage_pct": 14.005,
+  "online_revenue_share_pct": 40.20830128084292,
+  "in_store_revenue_share_pct": 59.79169871915708,
+  "weekend_revenue_share_pct": 28.4575897305016,
+  "yoy_revenue_growth_pct": 0.13001718057522127,
+  "yoy_profit_growth_pct": 0.19064358050564292,
+  "yoy_txn_growth_pct": -0.1498875843117662
+}

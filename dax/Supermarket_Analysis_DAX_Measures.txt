@@ -1,0 +1,757 @@
+-- =============================================================================
+-- SUPERMARKET SALES PERFORMANCE - DAX MEASURES & CALCULATED COLUMNS
+-- =============================================================================
+-- Compatible with: Power BI, SQL Server Analysis Services (SSAS Tabular),
+--                  Excel Power Pivot
+-- Author: Data Analysis Team
+-- Date: 2026-10-15
+--
+-- This file contains:
+-- 1. Calculated Columns (for the FactTransactions table and dimensions)
+-- 2. DAX Measures (for Power BI visuals and KPI cards)
+-- 3. Time Intelligence measures (YoY, MoM, rolling averages)
+-- 4. RFM measures
+-- 5. Anomaly detection measures
+-- 6. KPI Status flags (Red/Yellow/Green)
+--
+-- Usage:
+--   - In Power BI Desktop: Modeling > New Measure / New Column
+--   - Paste each measure/column definition
+--   - Replace table names if your tables have different names
+-- =============================================================================
+
+
+-- =============================================================================
+-- SECTION 1: CALCULATED COLUMNS (FactTransactions table)
+-- =============================================================================
+
+-- Year column (extracted from transaction_date)
+FactTransactions[Year] = YEAR(FactTransactions[transaction_date])
+
+-- Month number
+FactTransactions[Month] = MONTH(FactTransactions[transaction_date])
+
+-- Month name
+FactTransactions[MonthName] = FORMAT(FactTransactions[transaction_date], "MMM")
+
+-- Quarter
+FactTransactions[Quarter] = "Q" & FORMAT(FactTransactions[transaction_date], "Q")
+
+-- Year-Month for time series (e.g., "2024-01")
+FactTransactions[YearMonth] = FORMAT(FactTransactions[transaction_date], "YYYY-MM")
+
+-- Day of week name
+FactTransactions[DayName] = FORMAT(FactTransactions[transaction_date], "dddd")
+
+-- Is weekend flag
+FactTransactions[IsWeekend] =
+    IF(
+        WEEKDAY(FactTransactions[transaction_date], 2) >= 6,
+        "Weekend",
+        "Weekday"
+    )
+
+-- Season (Northern Hemisphere)
+FactTransactions[Season] =
+    SWITCH(
+        TRUE(),
+        MONTH(FactTransactions[transaction_date]) IN {3, 4, 5}, "Spring",
+        MONTH(FactTransactions[transaction_date]) IN {6, 7, 8}, "Summer",
+        MONTH(FactTransactions[transaction_date]) IN {9, 10, 11}, "Autumn",
+        "Winter"
+    )
+
+-- Profit margin per transaction
+FactTransactions[ProfitMargin] =
+    DIVIDE(FactTransactions[gross_profit], FactTransactions[total_amount], 0)
+
+-- Discount tier (for grouping)
+FactTransactions[DiscountTier] =
+    SWITCH(
+        TRUE(),
+        FactTransactions[discount_percent] = 0, "0%",
+        FactTransactions[discount_percent] <= 10, "1-10%",
+        FactTransactions[discount_percent] <= 20, "11-20%",
+        FactTransactions[discount_percent] <= 30, "21-30%",
+        "31-50%"
+    )
+
+-- Promotion flag (Yes/No)
+FactTransactions[PromotionFlag] =
+    IF(FactTransactions[promotion_active] = 1, "Yes", "No")
+
+-- Coupon flag (Yes/No)
+FactTransactions[CouponFlag] =
+    IF(FactTransactions[coupon_used] = 1, "Yes", "No")
+
+-- Sales channel category (In-store vs Online)
+FactTransactions[ChannelCategory] =
+    SWITCH(
+        FactTransactions[sales_channel],
+        "In Store", "In-Store",
+        "Mobile App", "Online",
+        "Website", "Online",
+        "Click and Collect", "Online",
+        "Home Delivery", "Online",
+        "Other"
+    )
+
+-- Is profitable flag
+FactTransactions[IsProfitable] =
+    IF(FactTransactions[gross_profit] > 0, "Yes", "No")
+
+-- Profitability bucket
+FactTransactions[ProfitBucket] =
+    SWITCH(
+        TRUE(),
+        FactTransactions[gross_profit] < 0, "Loss",
+        FactTransactions[gross_profit] < 20, "Low ($0-20)",
+        FactTransactions[gross_profit] < 50, "Medium ($20-50)",
+        FactTransactions[gross_profit] < 100, "High ($50-100)",
+        "Premium ($100+)"
+    )
+
+
+-- =============================================================================
+-- SECTION 2: CALCULATED COLUMNS (DimCustomer table)
+-- =============================================================================
+
+-- Customer age group
+DimCustomer[AgeGroup] =
+    SWITCH(
+        TRUE(),
+        DimCustomer[customer_age] < 26, "18-25",
+        DimCustomer[customer_age] < 36, "26-35",
+        DimCustomer[customer_age] < 46, "36-45",
+        DimCustomer[customer_age] < 56, "46-55",
+        DimCustomer[customer_age] < 66, "56-65",
+        "65+"
+    )
+
+-- Membership tier ranking (for sorting)
+DimCustomer[TierRank] =
+    SWITCH(
+        DimCustomer[membership_tier],
+        "Bronze", 1,
+        "Silver", 2,
+        "Gold", 3,
+        "Platinum", 4,
+        0
+    )
+
+
+-- =============================================================================
+-- SECTION 3: CORE KPI MEASURES
+-- =============================================================================
+
+-- Total Revenue
+[Total Revenue] = SUM(FactTransactions[total_amount])
+
+-- Total Gross Profit
+[Total Profit] = SUM(FactTransactions[gross_profit])
+
+-- Total COGS
+[Total COGS] = SUM(FactTransactions[cost_of_goods_sold])
+
+-- Total Transactions (distinct)
+[Total Transactions] = DISTINCTCOUNT(FactTransactions[transaction_id])
+
+-- Unique Customers
+[Unique Customers] = DISTINCTCOUNT(FactTransactions[customer_id])
+
+-- Total Items Sold
+[Total Items Sold] = SUM(FactTransactions[quantity])
+
+-- Average Order Value (AOV)
+[Avg Order Value] =
+    DIVIDE([Total Revenue], [Total Transactions], 0)
+
+-- Gross Profit Margin %
+[Profit Margin %] =
+    DIVIDE([Total Profit], [Total Revenue], 0)
+
+-- Average Discount %
+[Avg Discount %] = AVERAGE(FactTransactions[discount_percent])
+
+-- Average Customer Satisfaction
+[Avg Satisfaction] = AVERAGE(FactTransactions[customer_satisfaction_score])
+
+-- Average Service Rating
+[Avg Service Rating] = AVERAGE(FactTransactions[service_rating])
+
+-- Return Rate %
+[Return Rate %] =
+    DIVIDE(
+        CALCULATE(
+            [Total Transactions],
+            FILTER(FactTransactions, FactTransactions[return_flag] = "Yes")
+        ),
+        [Total Transactions],
+        0
+    )
+
+
+-- =============================================================================
+-- SECTION 4: TIME INTELLIGENCE MEASURES (YoY, MoM, Rolling)
+-- =============================================================================
+
+-- Revenue same period last year (YoY)
+[Revenue LY] =
+    CALCULATE(
+        [Total Revenue],
+        SAMEPERIODLASTYEAR(FactTransactions[transaction_date])
+    )
+
+-- YoY Revenue Growth %
+[YoY Revenue Growth %] =
+    DIVIDE(
+        [Total Revenue] - [Revenue LY],
+        [Revenue LY],
+        0
+    )
+
+-- Profit same period last year
+[Profit LY] =
+    CALCULATE(
+        [Total Profit],
+        SAMEPERIODLASTYEAR(FactTransactions[transaction_date])
+    )
+
+-- YoY Profit Growth %
+[YoY Profit Growth %] =
+    DIVIDE(
+        [Total Profit] - [Profit LY],
+        [Profit LY],
+        0
+    )
+
+-- Transactions same period last year
+[Transactions LY] =
+    CALCULATE(
+        [Total Transactions],
+        SAMEPERIODLASTYEAR(FactTransactions[transaction_date])
+    )
+
+-- YoY Transaction Growth %
+[YoY Txn Growth %] =
+    DIVIDE(
+        [Total Transactions] - [Transactions LY],
+        [Transactions LY],
+        0
+    )
+
+-- Revenue previous month (MoM)
+[Revenue PM] =
+    CALCULATE(
+        [Total Revenue],
+        DATEADD(FactTransactions[transaction_date], -1, MONTH)
+    )
+
+-- MoM Revenue Growth %
+[MoM Revenue Growth %] =
+    DIVIDE(
+        [Total Revenue] - [Revenue PM],
+        [Revenue PM],
+        0
+    )
+
+-- 7-day rolling average revenue
+[7D Rolling Avg Revenue] =
+    CALCULATE(
+        AVERAGEX(
+            VALUES(FactTransactions[transaction_date]),
+            CALCULATE(SUM(FactTransactions[total_amount]))
+        ),
+        DATESINPERIOD(
+            FactTransactions[transaction_date],
+            MAX(FactTransactions[transaction_date]),
+            -7,
+            DAY
+        )
+    )
+
+-- 30-day rolling average revenue
+[30D Rolling Avg Revenue] =
+    CALCULATE(
+        AVERAGEX(
+            VALUES(FactTransactions[transaction_date]),
+            CALCULATE(SUM(FactTransactions[total_amount]))
+        ),
+        DATESINPERIOD(
+            FactTransactions[transaction_date],
+            MAX(FactTransactions[transaction_date]),
+            -30,
+            DAY
+        )
+    )
+
+-- Year-to-Date Revenue
+[YTD Revenue] =
+    CALCULATE(
+        [Total Revenue],
+        DATESYTD(FactTransactions[transaction_date])
+    )
+
+-- YTD Revenue previous year
+[YTD Revenue LY] =
+    CALCULATE(
+        [YTD Revenue],
+        SAMEPERIODLASTYEAR(FactTransactions[transaction_date])
+    )
+
+-- YTD Revenue Growth %
+[YTD Revenue Growth %] =
+    DIVIDE(
+        [YTD Revenue] - [YTD Revenue LY],
+        [YTD Revenue LY],
+        0
+    )
+
+
+-- =============================================================================
+-- SECTION 5: SEGMENT-LEVEL MEASURES
+-- =============================================================================
+
+-- Revenue by Customer Segment (used with Customer Segment in visual)
+-- (Implicit measure: just use [Total Revenue] with customer_segment on axis)
+
+-- Revenue by Region
+[Revenue East] =
+    CALCULATE(
+        [Total Revenue],
+        FILTER(DimStore, DimStore[store_region] = "East")
+    )
+
+-- Revenue share by region (use as % of total in visuals)
+[Revenue Share %] =
+    DIVIDE(
+        [Total Revenue],
+        CALCULATE([Total Revenue], ALLSELECTED(DimStore))
+    )
+
+-- Online vs In-Store Revenue
+[Online Revenue] =
+    CALCULATE(
+        [Total Revenue],
+        FILTER(FactTransactions, FactTransactions[ChannelCategory] = "Online")
+    )
+
+[In-Store Revenue] =
+    CALCULATE(
+        [Total Revenue],
+        FILTER(FactTransactions, FactTransactions[ChannelCategory] = "In-Store")
+    )
+
+[Online Revenue Share %] =
+    DIVIDE([Online Revenue], [Total Revenue], 0)
+
+
+-- =============================================================================
+-- SECTION 6: RFM MEASURES (per customer)
+-- =============================================================================
+
+-- Recency (days since last purchase)
+[Recency Days] =
+    DATEDIFF(
+        MAX(FactTransactions[transaction_date]),
+        MAX(FactTransactions[transaction_date]) + 1,
+        DAY
+    )
+
+-- Frequency (number of transactions)
+[Frequency] = [Total Transactions]
+
+-- Monetary (total spend)
+[Monetary] = [Total Revenue]
+
+-- Average Order Value per Customer
+[Avg Order Value per Customer] =
+    DIVIDE([Monetary], [Frequency], 0)
+
+
+-- =============================================================================
+-- SECTION 7: ANOMALY DETECTION MEASURES
+-- =============================================================================
+
+-- Daily revenue (for time-series visuals)
+[Daily Revenue] =
+    CALCULATE(
+        SUM(FactTransactions[total_amount]),
+        VALUES(FactTransactions[transaction_date])
+    )
+
+-- Mean daily revenue (overall)
+[Mean Daily Revenue] =
+    AVERAGEX(
+        VALUES(FactTransactions[transaction_date]),
+        [Daily Revenue]
+    )
+
+-- Standard deviation of daily revenue
+[StdDev Daily Revenue] =
+    STDEVX.P(
+        VALUES(FactTransactions[transaction_date]),
+        [Daily Revenue]
+    )
+
+-- Z-score per day
+[Daily Z-Score] =
+    DIVIDE(
+        [Daily Revenue] - [Mean Daily Revenue],
+        [StdDev Daily Revenue],
+        0
+    )
+
+-- Is anomaly flag (|z| > 2.5)
+[Is Anomaly] =
+    IF(ABS([Daily Z-Score]) > 2.5, "ANOMALY", "Normal")
+
+-- Anomaly count
+[Anomaly Count] =
+    CALCULATE(
+        COUNTROWS(VALUES(FactTransactions[transaction_date])),
+        FILTER(VALUES(FactTransactions[transaction_date]), [Is Anomaly] = "ANOMALY")
+    )
+
+
+-- =============================================================================
+-- SECTION 8: KPI STATUS FLAGS (Red/Yellow/Green)
+-- =============================================================================
+
+-- Profit Margin Status flag
+[Profit Margin Status] =
+    SWITCH(
+        TRUE(),
+        [Profit Margin %] >= 0.30, "GREEN",
+        [Profit Margin %] >= 0.25, "YELLOW",
+        "RED"
+    )
+
+-- AOV Status flag
+[AOV Status] =
+    SWITCH(
+        TRUE(),
+        [Avg Order Value] >= 90, "GREEN",
+        [Avg Order Value] >= 80, "YELLOW",
+        "RED"
+    )
+
+-- Return Rate Status
+[Return Rate Status] =
+    SWITCH(
+        TRUE(),
+        [Return Rate %] <= 0.03, "GREEN",
+        [Return Rate %] <= 0.05, "YELLOW",
+        "RED"
+    )
+
+-- Satisfaction Status
+[Satisfaction Status] =
+    SWITCH(
+        TRUE(),
+        [Avg Satisfaction] >= 4.5, "GREEN",
+        [Avg Satisfaction] >= 4.0, "YELLOW",
+        "RED"
+    )
+
+-- YoY Growth Status
+[YoY Growth Status] =
+    SWITCH(
+        TRUE(),
+        [YoY Revenue Growth %] >= 0.05, "GREEN",
+        [YoY Revenue Growth %] >= 0, "YELLOW",
+        "RED"
+    )
+
+-- Promotion Active Status
+[Promotion Status] =
+    VAR _promotion_pct =
+        DIVIDE(
+            CALCULATE([Total Transactions],
+                FILTER(FactTransactions, FactTransactions[PromotionFlag] = "Yes")),
+            [Total Transactions],
+            0
+        )
+    RETURN
+        SWITCH(
+            TRUE(),
+            _promotion_pct <= 0.25, "GREEN",
+            _promotion_pct <= 0.35, "YELLOW",
+            "RED"
+        )
+
+-- Online Share Status
+[Online Share Status] =
+    SWITCH(
+        TRUE(),
+        [Online Revenue Share %] >= 0.40, "GREEN",
+        [Online Revenue Share %] >= 0.25, "YELLOW",
+        "RED"
+    )
+
+-- Avg Discount Status
+[Discount Status] =
+    SWITCH(
+        TRUE(),
+        [Avg Discount %] <= 0.10, "GREEN",
+        [Avg Discount %] <= 0.15, "YELLOW",
+        "RED"
+    )
+
+
+-- =============================================================================
+-- SECTION 9: COHORT & RETENTION MEASURES
+-- =============================================================================
+
+-- Customer first purchase date (cohort anchor)
+[First Purchase Date] =
+    CALCULATE(
+        MIN(FactTransactions[transaction_date]),
+        REMOVEFILTERS(FactTransactions),
+        VALUES(DimCustomer[customer_id])
+    )
+
+-- Cohort month (first purchase month)
+[Cohort Month] =
+    EOMONTH([First Purchase Date], -1) + 1
+
+-- Cohort index (months since first purchase, for current period)
+[Cohort Index] =
+    DATEDIFF(
+        [Cohort Month],
+        EOMONTH(MAX(FactTransactions[transaction_date]), -1) + 1,
+        MONTH
+    )
+
+-- New customers in current period
+[New Customers] =
+    CALCULATE(
+        DISTINCTCOUNT(FactTransactions[customer_id]),
+        FILTER(
+            FactTransactions,
+            FactTransactions[transaction_date] = [First Purchase Date]
+        )
+    )
+
+-- Retained customers (made a purchase in current period AND had a prior purchase)
+[Retained Customers] =
+    CALCULATE(
+        DISTINCTCOUNT(FactTransactions[customer_id]),
+        FILTER(
+            VALUES(FactTransactions[customer_id]),
+            CALCULATE(MIN(FactTransactions[transaction_date])) <
+                MIN(FactTransactions[transaction_date])
+        )
+    )
+
+-- Retention Rate %
+[Retention Rate %] =
+    DIVIDE(
+        [Retained Customers],
+        [Unique Customers] - [New Customers],
+        0
+    )
+
+
+-- =============================================================================
+-- SECTION 10: SEASONALITY & PATTERN MEASURES
+-- =============================================================================
+
+-- Weekend revenue
+[Weekend Revenue] =
+    CALCULATE(
+        [Total Revenue],
+        FILTER(FactTransactions, FactTransactions[IsWeekend] = "Weekend")
+    )
+
+-- Weekend revenue share
+[Weekend Revenue Share %] =
+    DIVIDE([Weekend Revenue], [Total Revenue], 0)
+
+-- Holiday revenue
+[Holiday Revenue] =
+    CALCULATE(
+        [Total Revenue],
+        FILTER(FactTransactions, FactTransactions[is_holiday] = 1)
+    )
+
+-- Holiday revenue share
+[Holiday Revenue Share %] =
+    DIVIDE([Holiday Revenue], [Total Revenue], 0)
+
+-- Peak hour revenue (top shopping hour)
+[Peak Hour] =
+    VAR _hourly_rev =
+        SUMMARIZE(
+            FactTransactions,
+            FactTransactions[shopping_hour],
+            "Rev", [Total Revenue]
+        )
+    RETURN
+        MAXX(
+            TOPN(1, _hourly_rev, [Rev], DESC),
+            FactTransactions[shopping_hour]
+        )
+
+-- Peak hour revenue amount
+[Peak Hour Revenue] =
+    VAR _hourly_rev =
+        SUMMARIZE(
+            FactTransactions,
+            FactTransactions[shopping_hour],
+            "Rev", [Total Revenue]
+        )
+    RETURN
+        MAXX(_hourly_rev, [Rev])
+
+
+-- =============================================================================
+-- SECTION 11: PROMOTION EFFECTIVENESS MEASURES
+-- =============================================================================
+
+-- Promotion revenue
+[Promotion Revenue] =
+    CALCULATE(
+        [Total Revenue],
+        FILTER(FactTransactions, FactTransactions[PromotionFlag] = "Yes")
+    )
+
+-- No-promotion revenue
+[No Promotion Revenue] =
+    CALCULATE(
+        [Total Revenue],
+        FILTER(FactTransactions, FactTransactions[PromotionFlag] = "No")
+    )
+
+-- Promotion AOV
+[Promotion AOV] =
+    CALCULATE(
+        [Avg Order Value],
+        FILTER(FactTransactions, FactTransactions[PromotionFlag] = "Yes")
+    )
+
+-- No-promotion AOV
+[No Promotion AOV] =
+    CALCULATE(
+        [Avg Order Value],
+        FILTER(FactTransactions, FactTransactions[PromotionFlag] = "No")
+    )
+
+-- Promotion margin
+[Promotion Margin %] =
+    CALCULATE(
+        [Profit Margin %],
+        FILTER(FactTransactions, FactTransactions[PromotionFlag] = "Yes")
+    )
+
+-- No-promotion margin
+[No Promotion Margin %] =
+    CALCULATE(
+        [Profit Margin %],
+        FILTER(FactTransactions, FactTransactions[PromotionFlag] = "No")
+    )
+
+-- Coupon revenue
+[Coupon Revenue] =
+    CALCULATE(
+        [Total Revenue],
+        FILTER(FactTransactions, FactTransactions[CouponFlag] = "Yes")
+    )
+
+-- Coupon usage rate
+[Coupon Usage %] =
+    DIVIDE(
+        CALCULATE([Total Transactions],
+            FILTER(FactTransactions, FactTransactions[CouponFlag] = "Yes")),
+        [Total Transactions],
+        0
+    )
+
+
+-- =============================================================================
+-- SECTION 12: RANKING MEASURES
+-- =============================================================================
+
+-- Revenue rank by region
+[Revenue Rank by Region] =
+    RANKX(
+        ALLSELECTED(DimStore[store_region]),
+        [Total Revenue],
+        ,
+        DESC,
+        DENSE
+    )
+
+-- Revenue rank by category
+[Revenue Rank by Category] =
+    RANKX(
+        ALLSELECTED(DimProduct[product_category]),
+        [Total Revenue],
+        ,
+        DESC,
+        DENSE
+    )
+
+-- Margin rank by category (within current filter context)
+[Margin Rank by Category] =
+    RANKX(
+        ALLSELECTED(DimProduct[product_category]),
+        [Profit Margin %],
+        ,
+        DESC,
+        DENSE
+    )
+
+
+-- =============================================================================
+-- SECTION 13: AGGREGATE / HELPER MEASURES
+-- =============================================================================
+
+-- Total revenue in thousand $ (for axis labels)
+[Total Revenue (k$)] = DIVIDE([Total Revenue], 1000)
+
+-- Total revenue in million $ (for KPI cards)
+[Total Revenue (M$)] = DIVIDE([Total Revenue], 1000000)
+
+-- Total profit in thousand $
+[Total Profit (k$)] = DIVIDE([Total Profit], 1000)
+
+-- Transactions count formatted
+[Transactions (formatted)] =
+    FORMAT([Total Transactions], "#,##0")
+
+-- Last refresh timestamp
+[Last Refresh] = NOW()
+
+-- Data range start
+[Data Range Start] = MIN(FactTransactions[transaction_date])
+
+-- Data range end
+[Data Range End] = MAX(FactTransactions[transaction_date])
+
+
+-- =============================================================================
+-- END OF DAX MEASURES FILE
+-- =============================================================================
+--
+-- USAGE TIPS:
+-- 1. Import the supermarket CSV into Power BI Desktop
+-- 2. Use Power Query to split the date column and create DimDate
+-- 3. Create relationships:
+--    - FactTransactions[customer_id] → DimCustomer[customer_id]
+--    - FactTransactions[store_id] → DimStore[store_id]
+--    - FactTransactions[product_id] → DimProduct[product_id]
+--    - FactTransactions[transaction_date] → DimDate[full_date]
+-- 4. Add all calculated columns first (Modeling > New Column)
+-- 5. Then add all measures (Modeling > New Measure)
+-- 6. Build visuals using these measures
+--
+-- VISUAL SUGGESTIONS:
+-- - KPI Card: [Total Revenue (M$)], [Profit Margin %], [Avg Order Value]
+-- - Line chart: Date on axis, [Total Revenue] and [Revenue LY] as values
+-- - Bar chart: store_region on axis, [Total Revenue] and [Revenue Share %]
+-- - Donut: product_department, [Total Revenue]
+-- - Matrix: cohort_month × cohort_index, COUNT(customer_id)
+-- - Card: [Anomaly Count], [YoY Revenue Growth %]
+-- - Table: KPI, Value, Status (use [Profit Margin Status], etc.)
+-- =============================================================================

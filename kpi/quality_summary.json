@@ -1,0 +1,13 @@
+{
+  "total_rows": 120000,
+  "total_columns": 102,
+  "date_min": "2023-01-01 00:00:00",
+  "date_max": "2024-12-30 00:00:00",
+  "unique_stores": 200,
+  "unique_customers": 75799,
+  "unique_products": 5000,
+  "unique_transactions": 120000,
+  "duplicates": 0,
+  "missing_pct_avg": 2.3810784313725493,
+  "cols_with_missing": 7
+}
